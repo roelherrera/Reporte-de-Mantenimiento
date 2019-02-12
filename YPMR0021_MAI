@@ -1,0 +1,35 @@
+*&---------------------------------------------------------------------*
+*&  Include           YPMR0021_MAI
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*  INICIALIZACION
+*----------------------------------------------------------------------*
+INITIALIZATION.
+
+CREATE OBJECT go_main.
+
+CALL METHOD go_main->init.
+
+
+*----------------------------------------------------------------------*
+*  AT SELECTION-SCREEN
+*----------------------------------------------------------------------*
+  AT SELECTION-SCREEN.
+  IF p_dwerk IS NOT INITIAL.
+    AUTHORITY-CHECK OBJECT 'YPM_SWERK'
+      ID 'SWERK' FIELD p_dwerk
+      ID 'ACTVT' FIELD '03'.
+    IF sy-subrc NE 0.
+      MESSAGE e004(co) WITH p_dwerk.
+    ENDIF.
+  ENDIF.
+
+
+*----------------------------------------------------------------------*
+*  START-OF-SELECTION
+*----------------------------------------------------------------------*
+  START-OF-SELECTION.
+
+    CALL METHOD go_main->execute
+      CHANGING
+        ct_data  = gdt_data.
