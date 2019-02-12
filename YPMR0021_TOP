@@ -1,0 +1,267 @@
+*&---------------------------------------------------------------------*
+*&  Include           YPMR0021_TOP
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+* CONSTANTES                                                           *
+*----------------------------------------------------------------------*
+CONSTANTS:
+  gc_valor1     TYPE  char01  VALUE '1',
+  gc_valor01    TYPE  char02  VALUE '01',
+  gc_valor04    TYPE  char02  VALUE '04'.
+
+*----------------------------------------------------------------------*
+* DECLARACIÓN DE VARIABLES                                             *
+*----------------------------------------------------------------------*
+* Campos Globales
+  DATA: gs_layout    TYPE  slis_vari.
+
+* Tipos
+TYPES:  BEGIN OF gty_data,
+          qmnum   TYPE  qmnum,        "Número de aviso
+          qmart   TYPE  qmart,        "Clase de aviso
+          qmtxt   TYPE  qmtxt,        "Texto breve
+          erdat   TYPE  erdat,        "Fecha de creación del registro
+          qmdat   TYPE  qmdat,        "Fecha del aviso
+          qmnam   TYPE  qmnam,        "Nombre autor aviso
+          iwerk   TYPE  iwerk,        "QMIH-IWERK Centro de planificación del mantenimiento
+          tplnr   TYPE  tplnr,        "Ubicación técnica
+          pltxt   TYPE  pltxt,        "Denominación de la ubicación técnica
+          equnr   TYPE  equnr,        "QMIH-EQUNR Número de equipo
+          eqktx   TYPE  ktx01,        "Denominación de objeto técnico
+          aufnr   TYPE  aufnr,        "Número de orden
+          auart   TYPE  aufart,       "Clase de orden
+          werks   TYPE  werks_d,      "Centro
+          erdat2  TYPE  auferfdat,    "Fecha entrada
+          ktext   TYPE  auftext,      "Texto breve
+          vaplz   TYPE  gewrk,        "Puesto de trabajo responsable en medidas de mantenimiento
+          ernam   TYPE  auferfnam,    "Nombre del autor
+          kostl   TYPE  aufkostl,     "Centro de coste para liquidación simple
+          gstrp	  TYPE 	pm_ordgstrp,  "Fecha de inicio extrema
+          gltrp	  TYPE 	co_gltrp,	    "Fecha fin extrema
+          addat   TYPE  addat,        "Orden PM: fecha de referencia
+          iloan   TYPE  iloan,        "Emplazamiento e imputación para objeto técnico
+          line    TYPE  j_stext,      "Status de sistema
+          status  TYPE  char10,       "STATUS
+          actintp TYPE  i,            "Costo de Actividades internas Planificadas
+          aprextp TYPE  i,            "Costo de Aprovisionamiento externo Planificado
+          matprop TYPE  i,            "Costo de Materiales Propios Planificados
+          aempp   TYPE  i,            "Costo de Aprovisionamiento externo + Materiales Propios Planificados
+          aiaempp TYPE  i,            "Costo de Actividades internas + Aprovisionamiento externo + Materiales Propios Planificados
+          actintr TYPE  i,            "Costo de Actividades internas Reales
+          aprextr TYPE  i,            "Costo de Aprovisionamiento externo Real
+          matpror TYPE  i,            "Costo de Materiales Propios Reales
+          aempr   TYPE  i,            "Costo de Aprovisionamiento externo + Materiales Propios Reales
+          aiaempr TYPE  i,            "Costo de Actividades internas + Aprovisionamiento externo + Materiales Propios Reales
+          banfn   TYPE  co_banfn,     "Número de solicitud de pedido
+          ltxa1   TYPE  ltxa1,        "Texto breve operación
+          t_color TYPE  lvc_t_scol,
+        END OF gty_data,
+
+        BEGIN OF gty_notification,
+          qmnum   TYPE  qmnum,        "Número de aviso
+          qmart   TYPE  qmart,        "Clase de aviso
+          qmtxt   TYPE  qmtxt,        "Texto breve
+          erdat   TYPE  erdat,        "Fecha de creación del registro
+          qmdat   TYPE  qmdat,        "Fecha del aviso
+          qmnam   TYPE  qmnam,        "Nombre autor aviso
+          aufnr   TYPE  aufnr,        "Número de orden
+          objnr   TYPE  qmobjnr,      "Número de objeto para gestión de status    "INSERT @001
+          iwerk   TYPE  iwerk,        "QMIH-IWERK Centro de planificación del mantenimiento
+          iloan   TYPE  iloan,        "Emplazamiento e imputación para objeto técnico
+          equnr   TYPE  equnr,        "QMIH-EQUNR Número de equipo
+          line    TYPE  j_stext,      "bsvx-sttxt Status del Sistema    "INSERT @001
+        END OF gty_notification,
+
+        BEGIN OF gty_location,
+          iloan   TYPE  iloan,        "Emplazamiento e imputación para objeto técnico
+          tplnr   TYPE  tplnr,        "Ubicación técnica
+        END OF gty_location,
+
+        BEGIN OF gty_order,
+          aufnr   TYPE  aufnr,        "Número de orden
+          objnr   TYPE  j_objnr,      "Número de objeto
+          auart   TYPE  aufart,       "Clase de orden
+          werks   TYPE  werks_d,      "Centro
+          erdat   TYPE  auferfdat,    "Fecha entrada
+          ktext   TYPE  auftext,      "Texto breve
+          vaplz   TYPE  gewrk,        "Puesto de trabajo responsable en medidas de mantenimiento
+          ernam   TYPE  auferfnam,    "Nombre del autor
+          kostl   TYPE  aufkostl,     "Centro de coste para liquidación simple
+          waers   TYPE  aufwaers,     "Moneda de orden
+          gstrp	  TYPE 	pm_ordgstrp,  "Fecha de inicio extrema
+          gltrp	  TYPE 	co_gltrp,	    "Fecha fin extrema
+          aufpl   TYPE  co_aufpl,     "Nº hoja ruta de operaciones en orden
+          addat   TYPE  addat,        "Orden PM: fecha de referencia
+          equnr   TYPE  equnr,        "Número de equipo
+          iloan   TYPE  iloan,        "Emplazamiento e imputación para objeto técnico
+          qmnum   TYPE  qmnum,        "Número de aviso
+          tplnr   TYPE  tplnr,        "Ubicación técnica
+          line    TYPE  j_stext,      "bsvx-sttxt Status del Sistema
+        END OF gty_order,
+
+        BEGIN OF gty_afvc,
+          aufpl   TYPE  co_aufpl,     "Nº hoja ruta de operaciones en orden
+          aplzl   TYPE  co_aplzl,     "Contador general de la orden
+          steus   TYPE  steus,        "Clave de control
+          ltxa1   TYPE  ltxa1,        "Texto breve operación
+          banfn   TYPE  co_banfn,     "Número de solicitud de pedido
+          bnfpo   TYPE  co_bnfpo,     "Número de posición de la socitud de pedido en la orden
+        END OF gty_afvc,
+
+        BEGIN OF gty_eqkt,
+          equnr   TYPE  equnr,        "Número de equipo
+          spras   TYPE  spras,        "Clave de idioma
+          eqktx   TYPE  ktx01,        "Denominación de objeto técnico
+        END OF gty_eqkt,
+
+        BEGIN OF gty_iflotx,
+          tplnr   TYPE  tplnr,        "Ubicación técnica
+          spras   TYPE  spras,        "Clave de idioma
+          pltxt   TYPE  pltxt,        "Denominación de la ubicación técnica
+        END OF gty_iflotx,
+
+        BEGIN OF gty_pmco,
+          objnr   TYPE  bp_objekt,    "Número de objeto
+          cocur   TYPE  bp_waers,     "Moneda
+          beltp   TYPE  bp_inout,     "Tipo de cargo
+          wrttp   TYPE  co_wrttp,     "Tipo de valor
+          gjahr   TYPE  gjahr,        "Ejercicio
+          acpos   TYPE  acpos,        "Categoría de valor
+          versn   TYPE  bp_version,   "Versión planificación/presupuestación
+          perbl   TYPE  perbl,        "Bloque de períodos
+          vorga   TYPE  bp_vorgang,   "Clase presupuesto presupuestación/planificación
+          bemot   TYPE  bemot,        "Criterio p.cálculo
+          abkat   TYPE  abkat,        "Categoría de desviación/periodificación
+          wrt01   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt02   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt03   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt04   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt05   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt06   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt07   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt08   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt09   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt10   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt11   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt12   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt13   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt14   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt15   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+          wrt16   TYPE  bp_wpl,       "Valor de período en moneda de ledger
+        END OF gty_pmco,
+
+        BEGIN OF gty_werks,
+          zvalor  TYPE  werks_d,      "Centro
+        END OF gty_werks,
+
+        BEGIN OF gty_aufk,
+          erdat  TYPE auferfdat,
+        END OF gty_aufk.
+
+* Tipo tabla
+  TYPES:  gtyd_data         TYPE STANDARD TABLE OF gty_data,
+          gtyd_notification TYPE STANDARD TABLE OF gty_notification,
+          gtyd_location     TYPE STANDARD TABLE OF gty_location,
+          gtyd_order        TYPE STANDARD TABLE OF gty_order,
+          gtyd_afvc         TYPE STANDARD TABLE OF gty_afvc,
+          gtyd_eqkt         TYPE STANDARD TABLE OF gty_eqkt,
+          gtyd_iflotx       TYPE STANDARD TABLE OF gty_iflotx,
+          gtyd_pmco         TYPE STANDARD TABLE OF gty_pmco.
+
+* Tablas Internas
+  DATA:   gdt_data                TYPE  gtyd_data,
+          gdt_notification0       TYPE  gtyd_notification,
+          gdt_notification0_aux1  TYPE  gtyd_notification,
+          gdt_notification0_aux2  TYPE  gtyd_notification,
+          gdt_notification1       TYPE  gtyd_notification,
+          gdt_location_order      TYPE  gtyd_location,
+          gdt_location0           TYPE  gtyd_location,
+          gdt_order               TYPE  gtyd_order,
+          gdt_afvc                TYPE  gtyd_afvc,
+          gdt_order_aux1          TYPE  gtyd_order,
+          gdt_order_aux2          TYPE  gtyd_order,
+          gdt_eqkt_order          TYPE  gtyd_eqkt,
+          gdt_eqkt0               TYPE  gtyd_eqkt,
+          gdt_iflotx_order        TYPE  gtyd_iflotx,
+          gdt_iflotx0             TYPE  gtyd_iflotx,
+          gdt_pmco                TYPE  gtyd_pmco,
+          gt_werks                TYPE TABLE OF  gty_werks,
+          gwa_aufk                TYPE gty_aufk.
+
+* Field symbols
+  FIELD-SYMBOLS:  <g_data>            LIKE LINE OF  gdt_data,
+                  <g_notification0>   LIKE LINE OF  gdt_notification0,
+                  <g_notification1>   LIKE LINE OF  gdt_notification1,
+                  <g_location_order>  LIKE LINE OF  gdt_location_order,
+                  <g_location0>       LIKE LINE OF  gdt_location0,
+                  <g_order>           LIKE LINE OF  gdt_order,
+                  <g_afvc>            LIKE LINE OF  gdt_afvc,
+                  <g_eqkt_order>      LIKE LINE OF  gdt_eqkt_order,
+                  <g_eqkt0>           LIKE LINE OF  gdt_eqkt0,
+                  <g_iflotx_order>    LIKE LINE OF  gdt_iflotx_order,
+                  <g_iflotx0>         LIKE LINE OF  gdt_iflotx0,
+                  <g_pmco>            LIKE LINE OF  gdt_pmco,
+                  <g_werks>           LIKE LINE OF  gt_werks.
+
+* Rangos
+  DATA: gr_werks  TYPE RANGE OF werks_d,
+        gwa_werks LIKE LINE OF gr_werks.
+
+*----------------------------------------------------------------------*
+* DEFINICIÓN DE CLASES LOCALES                                         *
+*----------------------------------------------------------------------*
+
+*----------------------------------------------------------------------*
+*       CLASS lcl_main DEFINITION                                      *
+*----------------------------------------------------------------------*
+* Clase que contiene la lógica principal del programa                  *
+*----------------------------------------------------------------------*
+  CLASS lcl_main DEFINITION.
+
+    PUBLIC SECTION.
+      METHODS:
+        constructor,
+
+        init,
+
+        execute       CHANGING    ct_data   TYPE  gtyd_data.
+
+    PRIVATE SECTION.
+      METHODS:
+        load_data         EXPORTING   et_data   TYPE  gtyd_data,
+
+        show_result       CHANGING    ct_data   TYPE  gtyd_data,
+
+        set_color         CHANGING    ct_data   TYPE  gtyd_data,
+
+        get_number_orders IMPORTING   it_data         TYPE  gtyd_data
+                          EXPORTING   ep_pendientes   TYPE  i
+                                      ep_programados  TYPE  i
+                                      ep_cerrados     TYPE  i,
+
+        set_top_of_page   IMPORTING   ip_pendientes   TYPE  i
+                                      ip_programados  TYPE  i
+                                      ip_cerrados     TYPE  i
+                          CHANGING    ct_data         TYPE REF TO cl_salv_form_element,
+
+        set_text_columns  CHANGING    ct_data         TYPE REF TO cl_salv_columns_table,
+
+        double_click      FOR EVENT   double_click OF cl_salv_events_table
+                          IMPORTING   column
+                                      row,
+
+        on_click          FOR EVENT   double_click OF cl_salv_events_table
+                          IMPORTING   column
+                                      row.
+
+        DATA: lo_werks    TYPE REF TO yppcl_constantes_trupal,
+              lo_layout_p TYPE REF TO yppcl_constantes_trupal.
+
+  ENDCLASS.   "lcl_main DEFINITION
+
+
+* Objetos
+  DATA: go_main   TYPE REF TO lcl_main.                                    "Objeto del programa principal
+
+  DATA: go_table      TYPE REF TO cl_salv_table,
+        go_salv       TYPE REF TO cx_salv_msg.
