@@ -1,0 +1,881 @@
+*&---------------------------------------------------------------------*
+*&  Include           YPMR0021_CLA
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*       CLASS lcl_main IMPLEMENTATION
+*----------------------------------------------------------------------*
+*                                                                      *
+*----------------------------------------------------------------------*
+  CLASS lcl_main IMPLEMENTATION.
+
+    METHOD constructor.
+
+      CREATE OBJECT lo_werks
+        EXPORTING
+          ip_zaplicacion = 'YPMR0021'
+          ip_zcgrupo     = 'WERKS'
+          ip_activos     = abap_true.
+
+      CREATE OBJECT lo_layout_p
+        EXPORTING
+          ip_zaplicacion = 'YPMR0021'
+          ip_zcgrupo     = 'LAYOUT'
+          ip_activos     = abap_true.
+
+    ENDMETHOD.                    "constructor
+
+
+    METHOD init.
+
+      DATA:   ls_fecha_fin  TYPE sy-datum,
+              ls_fecha_ini  TYPE sy-datum.
+
+      CLEAR:  gs_layout, ls_fecha_fin, ls_fecha_ini.
+      REFRESH gr_werks.
+
+      gs_layout = lo_layout_p->get_zvalue( ). "Layout predeterminado
+      p_layout = gs_layout.                   "Layout predeterminado esta aqui y no en YPMR0021_SEL
+
+      gt_werks = lo_werks->get_zlist( ).      "Centros con textos especiales
+
+      gwa_werks-sign    = 'I'.
+      gwa_werks-option  = 'EQ'.
+
+      LOOP AT gt_werks ASSIGNING <g_werks>.
+        gwa_werks-low = <g_werks>-zvalor.
+        APPEND gwa_werks TO gr_werks.
+      ENDLOOP.
+
+      CONCATENATE sy-datum(6) '01'  INTO ls_fecha_ini.
+      s_erdat-low = ls_fecha_ini.
+
+      CALL FUNCTION 'RP_LAST_DAY_OF_MONTHS'
+        EXPORTING
+          DAY_IN = sy-datum
+        IMPORTING
+          LAST_DAY_OF_MONTH = ls_fecha_fin
+        EXCEPTIONS
+          DAY_IN_NO_DATE = 1
+          OTHERS = 2.
+
+      IF sy-subrc <> 0.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+      ENDIF.
+      s_erdat-high = ls_fecha_fin.
+      APPEND s_erdat TO s_erdat.
+
+
+    ENDMETHOD.                    "init
+
+
+    METHOD execute.
+
+      CALL METHOD load_data
+        IMPORTING
+          et_data = gdt_data.
+
+      CALL METHOD set_color
+        CHANGING
+          ct_data = gdt_data.
+
+      CALL METHOD show_result
+        CHANGING
+          ct_data = gdt_data.
+
+    ENDMETHOD.                    "execute
+
+
+    METHOD load_data.
+
+      DATA: ls_act_int_p  TYPE  i,
+            ls_apr_ext_p  TYPE  i,
+            ls_mat_pro_p  TYPE  i,
+            ls_act_int_r  TYPE  i,
+            ls_apr_ext_r  TYPE  i,
+            ls_mat_pro_r  TYPE  i.
+
+      "Leer datos de Ordenes de Mantenimiento del periodo seleccionado
+      SELECT a~aufnr a~objnr a~auart a~werks a~erdat a~ktext a~vaplz a~ernam a~kostl a~waers
+             b~gstrp b~gltrp b~aufpl
+             c~addat c~equnr c~iloan c~qmnum
+        INTO TABLE gdt_order
+        FROM aufk AS a
+       INNER JOIN afko AS b ON a~aufnr EQ b~aufnr
+       INNER JOIN afih AS c ON c~aufnr EQ a~aufnr
+       WHERE a~erdat IN s_erdat   "Fecha de Entrada
+         AND a~werks EQ p_dwerk.  "Centro
+
+      IF gdt_order[] IS NOT INITIAL.
+        "Obtener Solicitud de Pedido
+        SELECT aufpl aplzl steus ltxa1 banfn bnfpo
+        INTO TABLE gdt_afvc
+        FROM afvc
+         FOR ALL ENTRIES IN gdt_order
+       WHERE aufpl EQ gdt_order-aufpl
+         AND steus EQ 'PM03'.
+
+        "Obtener Ubicación técnica y Denominación
+        gdt_order_aux1[] = gdt_order[].
+        SORT gdt_order_aux1 BY iloan.
+        DELETE ADJACENT DUPLICATES FROM gdt_order_aux1 COMPARING iloan.
+
+        IF gdt_order_aux1[] IS NOT INITIAL.
+          "Obtener Ubicación técnica
+          SELECT iloan tplnr
+            INTO TABLE gdt_location_order
+            FROM iloa
+             FOR ALL ENTRIES IN gdt_order_aux1
+           WHERE iloan EQ gdt_order_aux1-iloan.
+
+          IF gdt_location_order[] IS NOT INITIAL.
+            "Obtener Denominación de la Ubicación técnica
+            SELECT tplnr spras pltxt
+              INTO TABLE gdt_iflotx_order
+              FROM iflotx
+               FOR ALL ENTRIES IN gdt_location_order
+             WHERE tplnr EQ gdt_location_order-tplnr
+               AND spras EQ 'S'.
+          ENDIF.
+        ENDIF.
+
+        "Obtener Descripción de Equipo
+        gdt_order_aux2[] = gdt_order[].
+        SORT gdt_order_aux2 BY equnr.
+        DELETE ADJACENT DUPLICATES FROM gdt_order_aux2 COMPARING equnr.
+
+        IF gdt_order_aux2[] IS NOT INITIAL.
+          SELECT equnr spras eqktx
+            INTO TABLE gdt_eqkt_order
+            FROM eqkt
+             FOR ALL ENTRIES IN gdt_order_aux2
+           WHERE equnr EQ gdt_order_aux2-equnr.
+        ENDIF.
+
+        "Obtener datos de Avisos relacionados a las Ordenes de Mantenimiento seleccionado anteriormente
+        SELECT a~qmnum a~qmart a~qmtxt a~erdat a~qmdat a~qmnam a~aufnr
+               b~iwerk b~iloan b~equnr
+          INTO TABLE gdt_notification1
+          FROM qmel AS a
+         INNER JOIN qmih AS b ON a~qmnum EQ b~qmnum
+           FOR ALL ENTRIES IN gdt_order
+         WHERE a~qmnum EQ gdt_order-qmnum.
+
+        "Obtener Status del sistema
+        LOOP AT gdt_order ASSIGNING <g_order>.
+          CALL FUNCTION 'STATUS_TEXT_EDIT'
+            EXPORTING
+              client      = sy-mandt
+              objnr       = <g_order>-objnr
+              only_active = 'X'
+              spras       = 'S'
+            IMPORTING
+              line = <g_order>-line
+            EXCEPTIONS
+              object_not_found = 1
+            OTHERS = 2.
+        ENDLOOP.
+
+        "Obtenr datos de Costos
+        SELECT objnr cocur beltp wrttp gjahr acpos versn perbl vorga bemot abkat
+               wrt01 wrt02 wrt03 wrt04 wrt05 wrt06 wrt07 wrt08 wrt09 wrt10 wrt11 wrt12 wrt13 wrt14 wrt15 wrt16
+          INTO TABLE gdt_pmco
+          FROM pmco
+           FOR ALL ENTRIES IN gdt_order
+         WHERE objnr EQ gdt_order-objnr
+           AND cocur EQ gdt_order-waers
+           AND beltp EQ gc_valor1.
+      ENDIF.
+
+      "Leer datos de Avisos del periodo seleccionado NO relacionados a ninguna Orden de Mantenimiento
+      SELECT a~qmnum a~qmart a~qmtxt a~erdat a~qmdat a~qmnam a~aufnr a~objnr  "REPLACE @001
+             b~iwerk b~iloan b~equnr
+        INTO TABLE gdt_notification0
+        FROM qmel AS a
+       INNER JOIN qmih AS b ON a~qmnum EQ b~qmnum
+       WHERE a~qmdat IN s_erdat   "QMEL-QMDAT = Fecha del aviso
+         AND b~iwerk EQ p_dwerk
+         AND a~aufnr EQ space.
+
+* INSERT @001 {
+      "Obtener Status del sistema si esta seleccionado el check
+      IF c_mece EQ 'X'.
+        LOOP AT gdt_notification0 ASSIGNING <g_notification0>.
+          CALL FUNCTION 'STATUS_TEXT_EDIT'
+            EXPORTING
+              client      = sy-mandt
+              objnr       = <g_notification0>-objnr
+              only_active = 'X'
+              spras       = 'S'
+            IMPORTING
+              line = <g_notification0>-line
+            EXCEPTIONS
+              object_not_found = 1
+            OTHERS = 2.
+        ENDLOOP.
+
+        DELETE gdt_notification0 WHERE line EQ 'MECE'.
+
+      ENDIF.
+* } INSERT @001
+
+      IF gdt_notification0[] IS NOT INITIAL.
+        "Obtener Ubicación técnica de Avisos NO relacionados a ninguna Orden de Mantenimiento y Descripción
+        gdt_notification0_aux1[] = gdt_notification0[].
+        SORT gdt_notification0_aux1 BY iloan.
+        DELETE ADJACENT DUPLICATES FROM gdt_notification0_aux1 COMPARING iloan.
+
+        IF gdt_notification0_aux1[] IS NOT INITIAL.
+          "Obtener Ubicación técnica de Avisos NO relacionados...
+          SELECT iloan tplnr
+            INTO TABLE gdt_location0
+            FROM iloa
+             FOR ALL ENTRIES IN gdt_notification0_aux1
+           WHERE iloan EQ gdt_notification0_aux1-iloan.
+
+          IF gdt_location0[] IS NOT INITIAL.
+            "Obtener Denominación de la Ubicación técnica de Avisos NO relacionados...
+            SELECT tplnr spras pltxt
+              INTO TABLE gdt_iflotx0
+              FROM iflotx
+               FOR ALL ENTRIES IN gdt_location0
+             WHERE tplnr EQ gdt_location0-tplnr
+               AND spras EQ 'S'.
+          ENDIF.
+        ENDIF.
+
+        "Obtener Descripción de Equipo de Avisos NO relacionados a ninguna Orden de Mantenimiento
+        gdt_notification0_aux2[] = gdt_notification0[].
+        SORT gdt_notification0_aux2 BY equnr.
+        DELETE ADJACENT DUPLICATES FROM gdt_notification0_aux2 COMPARING equnr.
+
+        IF gdt_notification0_aux2[] IS NOT INITIAL.
+          SELECT equnr spras eqktx
+            INTO TABLE gdt_eqkt0
+            FROM eqkt
+             FOR ALL ENTRIES IN gdt_notification0_aux2
+           WHERE equnr EQ gdt_notification0_aux2-equnr.
+        ENDIF.
+      ENDIF.
+
+      "Llenar la tabla gdt_data con datos de solo avisos
+      LOOP AT gdt_notification0 ASSIGNING <g_notification0>.
+        APPEND INITIAL LINE TO gdt_data ASSIGNING <g_data>.
+        <g_data>-qmnum  = <g_notification0>-qmnum.
+        <g_data>-qmart  = <g_notification0>-qmart.
+        <g_data>-qmtxt  = <g_notification0>-qmtxt.
+        <g_data>-erdat  = <g_notification0>-erdat.
+        <g_data>-qmdat  = <g_notification0>-qmdat.
+        <g_data>-qmnam  = <g_notification0>-qmnam.
+        <g_data>-iwerk  = <g_notification0>-iwerk.
+
+        <g_data>-equnr  = <g_notification0>-equnr.
+        READ TABLE gdt_eqkt0 ASSIGNING <g_eqkt0> WITH KEY equnr = <g_notification0>-equnr.
+          IF sy-subrc EQ 0.
+            <g_data>-eqktx = <g_eqkt0>-eqktx.
+          ENDIF.
+
+        READ TABLE gdt_location0 ASSIGNING <g_location0> WITH KEY iloan = <g_notification0>-iloan.
+          IF sy-subrc EQ 0.
+            <g_data>-tplnr = <g_location0>-tplnr.
+            READ TABLE gdt_iflotx0 ASSIGNING <g_iflotx0> WITH KEY tplnr = <g_location0>-tplnr.
+              IF sy-subrc EQ 0.
+                <g_data>-pltxt = <g_iflotx0>-pltxt.
+              ENDIF.
+          ENDIF.
+      ENDLOOP.
+
+      "Llenar la tabla gdt_data con datos de Ordenes de mantenimiento
+      LOOP AT gdt_order ASSIGNING <g_order>.
+        APPEND INITIAL LINE TO gdt_data ASSIGNING <g_data>.
+        READ TABLE gdt_notification1 ASSIGNING <g_notification1> WITH KEY qmnum = <g_order>-qmnum.
+          IF sy-subrc EQ 0.
+            <g_data>-qmnum  = <g_notification1>-qmnum.
+            <g_data>-qmart  = <g_notification1>-qmart.
+            <g_data>-qmtxt  = <g_notification1>-qmtxt.
+            <g_data>-erdat  = <g_notification1>-erdat.
+            <g_data>-qmdat  = <g_notification1>-qmdat.
+            <g_data>-qmnam  = <g_notification1>-qmnam.
+            <g_data>-iwerk  = <g_notification1>-iwerk.
+          ENDIF.
+
+        <g_data>-equnr = <g_order>-equnr.
+        READ TABLE gdt_eqkt_order ASSIGNING <g_eqkt_order> WITH KEY equnr = <g_order>-equnr.
+          IF sy-subrc EQ 0.
+            <g_data>-eqktx = <g_eqkt_order>-eqktx.
+          ENDIF.
+
+        READ TABLE gdt_location_order ASSIGNING <g_location_order> WITH KEY iloan = <g_order>-iloan.
+          IF sy-subrc EQ 0.
+            <g_data>-tplnr = <g_location_order>-tplnr.
+            READ TABLE gdt_iflotx_order ASSIGNING <g_iflotx_order> WITH KEY tplnr = <g_location_order>-tplnr.
+              IF sy-subrc EQ 0.
+                <g_data>-pltxt = <g_iflotx_order>-pltxt.
+              ENDIF.
+          ENDIF.
+
+        <g_data>-aufnr  = <g_order>-aufnr.
+        <g_data>-auart  = <g_order>-auart.
+        <g_data>-werks  = <g_order>-werks.
+        <g_data>-erdat2 = <g_order>-erdat.
+        <g_data>-ktext  = <g_order>-ktext.
+        <g_data>-vaplz  = <g_order>-vaplz.
+        <g_data>-ernam  = <g_order>-ernam.
+        <g_data>-kostl  = <g_order>-kostl.
+        <g_data>-gstrp  = <g_order>-gstrp.
+        <g_data>-gltrp  = <g_order>-gltrp.
+        <g_data>-addat  = <g_order>-addat.
+
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+          EXPORTING
+            INPUT = <g_order>-iloan
+          IMPORTING
+            OUTPUT = <g_data>-iloan.    "<g_data>-iloan  = <g_order>-iloan.
+
+        <g_data>-line   = <g_order>-line.
+
+        CLEAR: ls_act_int_p, ls_apr_ext_p, ls_mat_pro_p, ls_act_int_r, ls_apr_ext_r, ls_mat_pro_r.
+        LOOP AT gdt_pmco ASSIGNING <g_pmco> WHERE objnr EQ <g_order>-objnr
+                                              AND cocur EQ <g_order>-waers
+                                              AND beltp EQ gc_valor1.
+          IF <g_pmco>-wrttp EQ gc_valor01.      "Costos Planificados
+            CASE <g_pmco>-acpos.
+              WHEN 600.   "Actividades Internas
+                ls_act_int_p = ls_act_int_p + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+
+              WHEN 415.   "Aprovisionamiento externo
+                ls_apr_ext_p = ls_apr_ext_p + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+
+              WHEN 240.   "Materiales Propios
+                ls_mat_pro_p = ls_mat_pro_p + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+            ENDCASE.
+          ELSEIF <g_pmco>-wrttp EQ gc_valor04.  "Costos Reales
+            CASE <g_pmco>-acpos.
+              WHEN 600.   "Actividades Internas
+                ls_act_int_r = ls_act_int_r + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+
+              WHEN 415.   "Aprovisionamiento externo
+                ls_apr_ext_r = ls_apr_ext_r + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+
+              WHEN 240.   "Materiales Propios
+                ls_mat_pro_r = ls_mat_pro_r + <g_pmco>-wrt01 + <g_pmco>-wrt02 + <g_pmco>-wrt03 + <g_pmco>-wrt04 + <g_pmco>-wrt05 + <g_pmco>-wrt06
+                                            + <g_pmco>-wrt07 + <g_pmco>-wrt08 + <g_pmco>-wrt09 + <g_pmco>-wrt10 + <g_pmco>-wrt11 + <g_pmco>-wrt12
+                                            + <g_pmco>-wrt13 + <g_pmco>-wrt14 + <g_pmco>-wrt15 + <g_pmco>-wrt16.
+            ENDCASE.
+          ENDIF.
+        ENDLOOP.
+
+        <g_data>-actintp = ls_act_int_p.    "Costo de Actividades internas Planificadas
+        <g_data>-aprextp = ls_apr_ext_p.    "Costo de Aprovisionamiento externo Planificado
+        <g_data>-matprop = ls_mat_pro_p.    "Costo de Materiales Propios Planificados
+        <g_data>-aempp = ls_apr_ext_p + ls_mat_pro_p. "Costo de Aprovisionamiento externo + Materiales Propios Planificados
+        <g_data>-aiaempp = ls_act_int_p + ls_apr_ext_p + ls_mat_pro_p.  "Costo de Actividades internas + Aprovisionamiento externo + Materiales Propios Planificados
+
+        <g_data>-actintr = ls_act_int_r.    "Costo de Actividades internas Planificadas
+        <g_data>-aprextr = ls_apr_ext_r.    "Costo de Aprovisionamiento externo Planificado
+        <g_data>-matpror = ls_mat_pro_r.    "Costo de Materiales Propios Planificados
+        <g_data>-aempr = ls_apr_ext_r + ls_mat_pro_r. "Costo de Aprovisionamiento externo + Materiales Propios Planificados
+        <g_data>-aiaempr = ls_act_int_r + ls_apr_ext_r + ls_mat_pro_r.  "Costo de Actividades internas + Aprovisionamiento externo + Materiales Propios Planificados
+
+        READ TABLE gdt_afvc ASSIGNING <g_afvc> WITH KEY aufpl = <g_order>-aufpl.
+          IF sy-subrc EQ 0.
+            <g_data>-banfn = <g_afvc>-banfn.
+            <g_data>-ltxa1 = <g_afvc>-ltxa1.
+          ENDIF.
+      ENDLOOP.
+
+    ENDMETHOD.                    "load_data
+
+
+    METHOD set_color.
+
+      DATA: lt_color  TYPE  lvc_t_scol,
+            ls_color  TYPE  lvc_s_scol.
+
+      LOOP AT gdt_data ASSIGNING <g_data>.
+        REFRESH lt_color.
+        IF <g_data>-line EQ space.
+          <g_data>-status = TEXT-001. "'PENDIENTE'.
+          CLEAR ls_color.
+          ls_color-fname = TEXT-ST1.  "'STATUS'.
+          ls_color-color-col = 6.
+          ls_color-color-int = 1.
+          ls_color-color-inv = 1.
+          APPEND ls_color TO lt_color.
+        ELSEIF <g_data>-line CS 'CTEC'.
+          <g_data>-status = TEXT-002. "'CERRADA'.
+          CLEAR ls_color.
+          ls_color-fname = TEXT-ST1.  "'STATUS'.
+          ls_color-color-col = 5.
+          ls_color-color-int = 1.
+          ls_color-color-inv = 1.
+          APPEND ls_color TO lt_color.
+        ELSE.
+          <g_data>-status = TEXT-003. "'PROGRAMADA'.
+          CLEAR ls_color.
+          ls_color-fname = TEXT-ST1.  "'STATUS'.
+          ls_color-color-col = 3.
+          ls_color-color-int = 1.
+          ls_color-color-inv = 1.
+          APPEND ls_color TO lt_color.
+        ENDIF.
+        <g_data>-t_color = lt_color.
+      ENDLOOP.
+
+    ENDMETHOD.                    "set_color
+
+
+    METHOD show_result.
+
+*     Declaration for ALV Grid
+      DATA: lo_alv          TYPE REF TO cl_salv_table.
+
+*     Declarations for ALV Functions
+      DATA: lo_functions    TYPE REF TO cl_salv_functions_list.
+
+*     Declaration for Layout Settings
+      DATA: lo_layout       TYPE REF TO cl_salv_layout,
+            ls_layout_key   TYPE salv_s_layout_key.
+
+*     Declaration for Global Display Settings
+      DATA: lo_settings     TYPE REF TO cl_salv_display_settings,
+            ls_title        TYPE lvc_title.
+
+*     Declaration for Aggregate Function Settings
+      DATA: lo_aggregations TYPE REF TO cl_salv_aggregations.
+
+*     Declaration for Table Selection settings
+      DATA: lo_select       TYPE REF TO cl_salv_selections.
+
+*     Declaration for Events
+      DATA: lo_events       TYPE REF TO cl_salv_events_table.
+
+*     Declaration for Top of List settings
+      DATA: lo_content      TYPE REF TO cl_salv_form_element.
+
+*     Declaration for ALV Columns
+      DATA: lo_columns      TYPE REF TO cl_salv_columns_table,
+            lo_column       TYPE REF TO cl_salv_column_table,
+            lt_column_ref   TYPE salv_t_column_ref,
+            ls_column_ref   LIKE LINE OF lt_column_ref.
+
+      DATA: ls_pendientes   TYPE  i,
+            ls_programados  TYPE  i,
+            ls_cerrados     TYPE  i,
+            ls_msg          TYPE string.
+
+*     Constructor del ALV
+      TRY.
+          cl_salv_table=>factory(
+            EXPORTING
+              list_display = if_salv_c_bool_sap=>false
+            IMPORTING
+              r_salv_table = go_table
+            CHANGING
+              t_table      = ct_data ).
+        CATCH cx_salv_msg INTO go_salv.
+        "Excepciones
+          ls_msg = go_salv->get_text( ).
+          MESSAGE ls_msg TYPE 'E'.
+      ENDTRY.
+
+*     Get functions details
+      lo_functions = go_table->get_functions( ).
+
+*     Activate All Buttons in Tool Bar
+      lo_functions->set_all( if_salv_c_bool_sap=>true ).
+
+*     Agregar status personalizado
+      TRY.
+        go_table->set_screen_status(
+                pfstatus      = 'STANDARD_FULLSCREEN'
+                report        = sy-repid
+                set_functions = go_table->c_functions_all ).
+        CATCH cx_salv_msg INTO go_salv.
+          "Excepciones
+          ls_msg = go_salv->get_text( ).  "MESSAGE s899(salv_exception) DISPLAY LIKE 'E'.
+          MESSAGE s899(salv_exception) DISPLAY LIKE 'E'.    "MESSAGE 'ERROR AQUI' TYPE 'E'.  "RETURN
+          RETURN.
+      ENDTRY.
+
+*     Layout Settings
+      ls_layout_key-report = sy-repid.        "Set Report ID as Layout Key
+      lo_layout = go_table->get_layout( ).    "Get Layout of Table
+      lo_layout->set_key( ls_layout_key ).    "Set Report Id to Layout
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ). "No Restriction to Save Layout" "'3'
+      IF p_layout IS INITIAL.
+        lo_layout->set_default( if_salv_c_bool_sap=>true ).   "Set Default Variant - Habilitar parametrización previa
+      ELSE.
+        lo_layout->set_initial_layout( p_layout ).            "Set the Selected Variant as Initial
+      ENDIF.
+
+*     Global Display Settings
+      "Colocar titulo al reporte
+      ls_title = TEXT-T01.    "'Reporte Necesidades Mantenimiento'.
+      lo_settings = go_table->get_display_settings( ).                    "Global Display settings
+      lo_settings->set_striped_pattern( cl_salv_display_settings=>true ). "Activate Strip Pattern
+      lo_settings->set_list_header( ls_title ).                            "Report Header
+
+*     Aggregate Function Settings
+      lo_aggregations = go_table->get_aggregations( ).                    "Get Aggregate Functions"
+
+*     Table Selection Settings
+      lo_select = go_table->get_selections( ).
+      IF lo_select IS NOT INITIAL.
+        lo_select->set_selection_mode( if_salv_c_selection_mode=>row_column ). "Allow single row Selection
+      ENDIF.
+
+*     Top of List settings
+      "Obtener numero de ordenes pendientes, programados y cerrados
+      CALL METHOD get_number_orders
+        EXPORTING
+          it_data         = ct_data
+        IMPORTING
+          ep_pendientes   = ls_pendientes
+          ep_programados  = ls_programados
+          ep_cerrados     = ls_cerrados.
+
+      "Setear Cabecera
+      CALL METHOD set_top_of_page
+        EXPORTING
+          ip_pendientes   = ls_pendientes
+          ip_programados  = ls_programados
+          ip_cerrados     = ls_cerrados
+        CHANGING
+          ct_data = lo_content.
+
+      "Aplicamos la cabecera
+      go_table->set_top_of_list( lo_content ).
+
+*     Event Register settings
+      lo_events = go_table->get_event( ).
+      SET HANDLER double_click
+                  on_click
+              FOR lo_events.
+
+*     Agregar color y cambiar texto a columnas
+*     Get the columns from ALV Table
+      lo_columns = go_table->get_columns( ).
+
+      IF lo_columns IS NOT INITIAL.
+*       Add Hotspot&Hyper Link to the column QMNUM y AUFNR
+        lt_column_ref = lo_columns->get( ).
+        LOOP AT lt_column_ref INTO ls_column_ref.
+          TRY.
+              lo_column ?= lo_columns->get_column( ls_column_ref-columnname ).
+            CATCH cx_salv_not_found.
+          ENDTRY.
+          IF lo_column IS NOT INITIAL.
+            IF ls_column_ref-columnname EQ TEXT-CO1.  "'QMNUM'.
+              lo_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
+              lo_column->set_key( if_salv_c_bool_sap=>true ).
+            ENDIF.
+            IF ls_column_ref-columnname EQ TEXT-CO2.  "'AUFNR'.
+              lo_column->set_cell_type( if_salv_c_cell_type=>hotspot ).
+              lo_column->set_key( if_salv_c_bool_sap=>true ).
+            ENDIF.
+          ENDIF.
+        ENDLOOP.
+
+*       Get columns properties
+        lo_columns->set_optimize( if_salv_c_bool_sap=>true ).
+        lo_columns->set_key_fixation( if_salv_c_bool_sap=>true ).
+
+        "Agregar color
+        TRY.
+            lo_columns->set_color_column( 'T_COLOR' ).
+          CATCH cx_salv_data_error .
+        ENDTRY.
+
+       "Agregar yo cambiar texto a columnas
+        CALL METHOD set_text_columns
+          CHANGING
+            ct_data = lo_columns.
+      ENDIF.
+
+      CALL METHOD go_table->display( ).
+
+    ENDMETHOD.                    "show_result
+
+
+    METHOD get_number_orders.
+
+      CLEAR: ep_pendientes, ep_programados, ep_cerrados.
+      LOOP AT it_data ASSIGNING <g_data>.
+        CASE <g_data>-status.
+          WHEN  TEXT-001. "'PENDIENTE'
+            ep_pendientes = ep_pendientes + 1.
+          WHEN  TEXT-002. "'CERRADA'
+            ep_cerrados = ep_cerrados + 1.
+          WHEN  TEXT-003. "'PROGRAMADA'
+            ep_programados = ep_programados + 1.
+        ENDCASE.
+      ENDLOOP.
+
+    ENDMETHOD.                    "get_number_orders
+
+
+    METHOD set_top_of_page.
+
+      DATA: lo_grid  TYPE REF TO cl_salv_form_layout_grid,
+            lo_text  TYPE REF TO cl_salv_form_text,
+            lo_label TYPE REF TO cl_salv_form_label.
+*             ls_head  TYPE string.
+
+      DATA: ls_total              TYPE  i,
+            ls_cumplimiento       TYPE  i,
+            ls_cumplimiento_text  TYPE  string.
+
+*      MOVE 'Indicador de Avance' TO ls_head.
+      CREATE OBJECT lo_grid.
+**    * Header of Top of Page **
+*      lo_grid->create_header_information( row     = 1
+*                                          column  = 1
+*                                          text    = ls_head
+*                                          tooltip = ls_head ).
+*    * Add Row **
+      lo_grid->add_row( ).
+
+*     Add Label in Grid
+      lo_label = lo_grid->create_label( row = 1
+                                        column = 1
+                                        text = TEXT-C01       "'N° Avisos Pendientes'
+                                        tooltip = TEXT-C02 ). "'Número de Avisos Pendientes'
+      lo_label = lo_grid->create_label( row = 1
+                                        column = 2
+                                        text = TEXT-C03       "'N° Avisos Programados'
+                                        tooltip = TEXT-C04 ). "Número de Avisos Programados
+      lo_label = lo_grid->create_label( row = 1
+                                        column = 3
+                                        text = TEXT-C05       "'N° Avisos Cerrados'
+                                        tooltip = TEXT-C06 ). "'Número de Avisos Cerrados'
+      lo_label = lo_grid->create_label( row = 1
+                                        column = 4
+                                        text = TEXT-C07       "'Total'
+                                        tooltip = TEXT-C07 ). "'Total'
+      lo_label = lo_grid->create_label( row = 1
+                                        column = 5
+                                        text = TEXT-C08       "'Cumplimiento'
+                                        tooltip = TEXT-C08 ). "'Cumplimiento'
+
+*     Add Text in The Grid
+      lo_text = lo_grid->create_text( row = 2
+                                      column = 1
+                                      text = ip_pendientes
+                                      tooltip = ip_pendientes ).
+      lo_text = lo_grid->create_text( row = 2
+                                      column = 2
+                                      text = ip_programados
+                                      tooltip = ip_programados ).
+      lo_text = lo_grid->create_text( row = 2
+                                      column = 3
+                                      text = ip_cerrados
+                                      tooltip = ip_cerrados ).
+
+      ls_total = ip_pendientes + ip_programados + ip_cerrados.
+      lo_text = lo_grid->create_text( row = 2
+                                      column = 4
+                                      text = ls_total
+                                      tooltip = ls_total ).
+
+      ls_cumplimiento = ip_cerrados * 100 / ls_total.
+      ls_cumplimiento = ABS( ls_cumplimiento ).
+      ls_cumplimiento_text = ls_cumplimiento.
+      CONCATENATE ls_cumplimiento_text '%' INTO ls_cumplimiento_text SEPARATED BY space.
+      lo_text = lo_grid->create_text( row = 2
+                                      column = 5
+                                      text = ls_cumplimiento_text
+                                      tooltip = ls_cumplimiento_text ).
+
+*    * Set Label and Text Link **
+      lo_label->set_label_for( lo_text ).
+
+*    * Move lr_grid to lr_content **
+      ct_data = lo_grid.
+
+    ENDMETHOD.                    "set_top_o_page
+
+
+    METHOD set_text_columns.
+
+*     Declaration for ALV Columns
+      DATA : lo_columns       TYPE REF TO cl_salv_columns_table.
+
+      lo_columns = go_table->get_columns( ).
+
+      "Agregar y/o cambiar Texto
+      TRY.
+        "Asignar texto en columna "Estado" valido para todos los negocios
+        lo_columns->get_column( 'STATUS' )->set_short_text( TEXT-011 ).   "'Estado'
+        lo_columns->get_column( 'STATUS' )->set_medium_text( TEXT-011 ).  "'Estado'
+        lo_columns->get_column( 'STATUS' )->set_long_text( TEXT-011 ).    "'Estado'
+
+        "Cambiar texto en columnas valido para todos los negocios
+        lo_columns->get_column( 'QMTXT' )->set_short_text( TEXT-021 ).  "'Desc.Aviso'
+        lo_columns->get_column( 'QMTXT' )->set_medium_text( TEXT-022 ). "'Descripción Aviso'
+        lo_columns->get_column( 'QMTXT' )->set_long_text( TEXT-023 ).   "'Descripción de Aviso'
+
+        lo_columns->get_column( 'EQKTX' )->set_short_text( TEXT-031 ).  "'Den.Equipo'
+        lo_columns->get_column( 'EQKTX' )->set_medium_text( TEXT-032 ). "'Denom.Equipo'
+        lo_columns->get_column( 'EQKTX' )->set_long_text( TEXT-033 ).   "'Denominación Equipo'
+
+        lo_columns->get_column( 'ACTINTP' )->set_short_text( TEXT-041 ).  "'A.I.Plan.'
+        lo_columns->get_column( 'ACTINTP' )->set_medium_text( TEXT-042 ). "'Act.Int.Plan.'
+        lo_columns->get_column( 'ACTINTP' )->set_long_text( TEXT-043 ).   "'Costo Act.Int.Plan.'
+
+        lo_columns->get_column( 'APREXTP' )->set_short_text( TEXT-051 ).  "'A.E.Plan.'
+        lo_columns->get_column( 'APREXTP' )->set_medium_text( TEXT-052 ). "'Apr.Ext.Plan.'
+        lo_columns->get_column( 'APREXTP' )->set_long_text( TEXT-053 ).   "'Costo Apr.Ext.Plan.'
+
+        lo_columns->get_column( 'MATPROP' )->set_short_text( TEXT-061 ).  "'M.P.Plan.'
+        lo_columns->get_column( 'MATPROP' )->set_medium_text( TEXT-062 ). "'Mat.Pro.Plan.'
+        lo_columns->get_column( 'MATPROP' )->set_long_text( TEXT-063 ).   "'Costo Mat.Pro.Plan.'
+
+        lo_columns->get_column( 'AIAEMPP' )->set_short_text( TEXT-071 ).  "'AI+AE+MP P'
+        lo_columns->get_column( 'AIAEMPP' )->set_medium_text( TEXT-072 ). "'AI+AE+MP Plan.'
+        lo_columns->get_column( 'AIAEMPP' )->set_long_text( TEXT-073 ).   "'Costo ActInt+AprExt+MatPro Planificados'
+
+        lo_columns->get_column( 'ACTINTR' )->set_short_text( TEXT-081 ).  "'A.I.Real'
+        lo_columns->get_column( 'ACTINTR' )->set_medium_text( TEXT-082 ). "'Act.Int.Real'
+        lo_columns->get_column( 'ACTINTR' )->set_long_text( TEXT-083 ).   "'Costo Act.Int.Real'
+
+        lo_columns->get_column( 'APREXTR' )->set_short_text( TEXT-091 ).  "'A.E.Real'
+        lo_columns->get_column( 'APREXTR' )->set_medium_text( TEXT-092 ). "'Apr.Ext.Real'
+        lo_columns->get_column( 'APREXTR' )->set_long_text( TEXT-093 ).   "'Costo Apr.Ext.Real'
+
+        lo_columns->get_column( 'MATPROR' )->set_short_text( TEXT-101 ).  "'M.P.Real'
+        lo_columns->get_column( 'MATPROR' )->set_medium_text( TEXT-102 ). "'Mat.Pro.Real'
+        lo_columns->get_column( 'MATPROR' )->set_long_text( TEXT-103 ).   "'Costo Mat.Pro.Real'
+
+        lo_columns->get_column( 'AIAEMPR' )->set_short_text( TEXT-111 ).  "'AI+AE+MP R'
+        lo_columns->get_column( 'AIAEMPR' )->set_medium_text( TEXT-112 ). "'AI+AE+MP Reales'
+        lo_columns->get_column( 'AIAEMPR' )->set_long_text( TEXT-113 ).   "'Costo ActInt+AprExt+MatPro Reales'
+
+        IF p_dwerk IN gr_werks.    "Cambio de texto valido solo para cajas: H8 y Sullana
+          lo_columns->get_column( 'ERDAT' )->set_short_text( TEXT-121 ).  "'F.Cre.Avi.'
+          lo_columns->get_column( 'ERDAT' )->set_medium_text( TEXT-122 ). "'Fe.Cre.Aviso'
+          lo_columns->get_column( 'ERDAT' )->set_long_text( TEXT-123 ).   "'Fe.Creación Aviso'
+
+          lo_columns->get_column( 'AUFNR' )->set_short_text( TEXT-131 ).  "'OT'
+          lo_columns->get_column( 'AUFNR' )->set_medium_text( TEXT-132 ). "'Num.OT'
+          lo_columns->get_column( 'AUFNR' )->set_long_text( TEXT-133 ).   "'Número OT'
+
+          lo_columns->get_column( 'AUART' )->set_short_text( TEXT-141 ).  "'Tip.OT'
+          lo_columns->get_column( 'AUART' )->set_medium_text( TEXT-142 ). "'Tipo OT'
+          lo_columns->get_column( 'AUART' )->set_long_text( TEXT-143 ).   "'Tipo OT'
+
+          lo_columns->get_column( 'ERDAT2' )->set_short_text( TEXT-151 ). "'Fe.Plan.'
+          lo_columns->get_column( 'ERDAT2' )->set_medium_text( TEXT-152 )."'Fecha Plan.'
+          lo_columns->get_column( 'ERDAT2' )->set_long_text( TEXT-153 ).  "'Fecha Planificación'
+
+          lo_columns->get_column( 'ERDAT2' )->set_short_text( TEXT-161 ). "'Fe.Plan.'
+          lo_columns->get_column( 'ERDAT2' )->set_medium_text( TEXT-162 )."'Fecha Plan.'
+          lo_columns->get_column( 'ERDAT2' )->set_long_text( TEXT-163 ).  "'Fecha Planificación'
+
+          lo_columns->get_column( 'ADDAT' )->set_short_text( TEXT-171 ).  "'Fe.Prog.'
+          lo_columns->get_column( 'ADDAT' )->set_medium_text( TEXT-172 ). "'Fecha Prog.'
+          lo_columns->get_column( 'ADDAT' )->set_long_text( TEXT-173 ).   "'Fecha Programación'
+
+          lo_columns->get_column( 'KTEXT' )->set_short_text( TEXT-181 ).  "'Actividad'
+          lo_columns->get_column( 'KTEXT' )->set_medium_text( TEXT-181 ). "'Actividad'
+          lo_columns->get_column( 'KTEXT' )->set_long_text( TEXT-181 ).   "'Actividad'
+
+          lo_columns->get_column( 'VAPLZ' )->set_short_text( TEXT-191 ).  "'Resp.'
+          lo_columns->get_column( 'VAPLZ' )->set_medium_text( TEXT-192 ). "'Responsable'
+          lo_columns->get_column( 'VAPLZ' )->set_long_text( TEXT-192 ).   "'Responsable'
+
+          lo_columns->get_column( 'ERNAM' )->set_short_text( TEXT-201 ).  "'Solic.'
+          lo_columns->get_column( 'ERNAM' )->set_medium_text( TEXT-202 ). "'Solicitante'
+          lo_columns->get_column( 'ERNAM' )->set_long_text( TEXT-202 ).   "'Solicitante'
+
+          lo_columns->get_column( 'LINE' )->set_short_text( TEXT-211 ). "'Condición'
+          lo_columns->get_column( 'LINE' )->set_medium_text( TEXT-211 )."'Condición'
+          lo_columns->get_column( 'LINE' )->set_long_text( TEXT-211 ).  "'Condición'
+
+          lo_columns->get_column( 'AEMPP' )->set_short_text( TEXT-221 ).  "'Costo Plan'
+          lo_columns->get_column( 'AEMPP' )->set_medium_text( TEXT-222 ). "'Costo Planificado'
+          lo_columns->get_column( 'AEMPP' )->set_long_text( TEXT-222 ).   "'Costo Planificado'
+
+          lo_columns->get_column( 'AEMPR' )->set_short_text( TEXT-231 ).  "'Costo Real'
+          lo_columns->get_column( 'AEMPR' )->set_medium_text( TEXT-231 ). "'Costo Real'
+          lo_columns->get_column( 'AEMPR' )->set_long_text( TEXT-231 ).   "'Costo Real'
+
+        ELSE.
+          lo_columns->get_column( 'AEMPP' )->set_short_text( TEXT-241 ).  "'A.E+MP P'
+          lo_columns->get_column( 'AEMPP' )->set_medium_text( TEXT-242 ). "'ActExt+MatPro Plan.'
+          lo_columns->get_column( 'AEMPP' )->set_long_text( TEXT-243 ).   "'Act.Ext+Mat.Pro.Planificados'
+
+          lo_columns->get_column( 'AEMPR' )->set_short_text( TEXT-251 ).  "'A.E+MP R'
+          lo_columns->get_column( 'AEMPR' )->set_medium_text( TEXT-252 ). "'ActExt+MatPro Real'
+          lo_columns->get_column( 'AEMPR' )->set_long_text( TEXT-253 ).   "'Act.Ext+Mat.Pro.Reales'
+        ENDIF.
+
+        CATCH cx_salv_not_found
+              cx_salv_data_error
+              cx_salv_existing.
+              RETURN.
+      ENDTRY.
+
+    ENDMETHOD.                    "set_text_columns
+
+
+    METHOD double_click.
+
+      IF column EQ TEXT-CO1.  "'QMNUM'.
+        READ TABLE gdt_data ASSIGNING <g_data> INDEX row.
+          IF sy-subrc EQ 0.
+            IF <g_data>-qmnum NE space.
+              SET PARAMETER ID 'IQM' FIELD <g_data>-qmnum.
+              CALL TRANSACTION 'IW23' AND SKIP FIRST SCREEN.
+             ENDIF.
+          ENDIF.
+      ELSEIF column EQ TEXT-CO2.  "'AUFNR'.
+        READ TABLE gdt_data ASSIGNING <g_data> INDEX row.
+          IF sy-subrc EQ 0.
+            IF <g_data>-aufnr NE space.
+              SET PARAMETER ID 'ANR' FIELD <g_data>-aufnr.
+              CALL TRANSACTION 'IW33' AND SKIP FIRST SCREEN.
+            ENDIF.
+          ENDIF.
+      ENDIF.
+
+      go_table->refresh( ).
+
+    ENDMETHOD.                    "double_click
+
+
+    METHOD on_click.
+
+      IF column EQ TEXT-CO1.  "'QMNUM'.
+        READ TABLE gdt_data ASSIGNING <g_data> INDEX row.
+          IF sy-subrc EQ 0.
+            IF <g_data>-qmnum NE space.
+              SET PARAMETER ID 'IQM' FIELD <g_data>-qmnum.
+              CALL TRANSACTION 'IW23' AND SKIP FIRST SCREEN.
+             ENDIF.
+          ENDIF.
+      ELSEIF column EQ TEXT-CO2.  "'AUFNR'.
+        READ TABLE gdt_data ASSIGNING <g_data> INDEX row.
+          IF sy-subrc EQ 0.
+            IF <g_data>-aufnr NE space.
+              SET PARAMETER ID 'ANR' FIELD <g_data>-aufnr.
+              CALL TRANSACTION 'IW33' AND SKIP FIRST SCREEN.
+            ENDIF.
+          ENDIF.
+      ENDIF.
+
+      go_table->refresh( ).
+
+    ENDMETHOD.                    "on_click
+
+  ENDCLASS.     "lcl_main IMPLEMENTATION
