@@ -1,0 +1,67 @@
+*&---------------------------------------------------------------------*
+*&  Include           YPMR0021_SEL
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+* DISEÑO PANTALLA DE SELECCIÓN                                         *
+*----------------------------------------------------------------------*
+  SELECTION-SCREEN BEGIN OF BLOCK b_01 WITH FRAME TITLE TEXT-B01. "Parámetros de Selección
+    PARAMETERS:       p_dwerk   TYPE  werks_d         OBLIGATORY DEFAULT '573'. "Centro
+    SELECT-OPTIONS:   s_erdat   FOR   gwa_aufk-erdat  OBLIGATORY.               "Periodo de la Orden (Fecha Entrada) Predeterminado esta en YPMR0021_CLA
+  SELECTION-SCREEN END OF BLOCK b_01.
+
+  SELECTION-SCREEN BEGIN OF BLOCK b_02 WITH FRAME TITLE TEXT-B02.               "Parámetros de Selección
+    PARAMETERS:   p_layout  TYPE  slis_vari.                                    "Layout predeterminado esta en YPMR0021_CLA metodo init
+  SELECTION-SCREEN END OF BLOCK b_02.
+
+* INSERT @001 {
+  SELECTION-SCREEN BEGIN OF BLOCK b_03 WITH FRAME TITLE TEXT-B03.               "Parámetros de Restrición
+    PARAMETERS:   c_mece    AS CHECKBOX.                                        "Retringir Avisos MECE
+  SELECTION-SCREEN END OF BLOCK b_03.
+* } INSERT @001
+
+*----------------------------------------------------------------------*
+* AT SELECTION-SCREEN                                                  *
+*----------------------------------------------------------------------*
+  AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_layout.
+
+* Declaration for Layout Settings
+  DATA: lo_layout       TYPE REF TO cl_salv_layout,
+        ls_layout_key   TYPE salv_s_layout_key,
+        ls_layout       TYPE salv_s_layout,
+        lt_layout_info  TYPE salv_t_layout_info,
+        ls_msg          TYPE string.
+
+  CLEAR : ls_layout.
+
+  TRY.
+
+    CALL METHOD cl_salv_table=>factory
+      EXPORTING
+        list_display = if_salv_c_bool_sap=>false
+      IMPORTING
+        r_salv_table = go_table
+      CHANGING
+        t_table      = gdt_data.
+
+    CATCH cx_salv_msg INTO go_salv.
+      "Excepciones
+      ls_msg = go_salv->get_text( ).
+      MESSAGE ls_msg TYPE 'E'.
+
+  ENDTRY.
+
+  IF go_table IS NOT INITIAL.
+
+    ls_layout_key-report = sy-repid.            "Set Layout Key as Report ID"  "MOVE sy-repid TO gr_layout_key-report.
+    lo_layout = go_table->get_layout( ).        "Get Layout of the Table
+    lo_layout->set_key( ls_layout_key ).        "Set Layout key to Layout
+    lt_layout_info = lo_layout->get_layouts( ). "Get the Layouts of report
+
+    IF lt_layout_info IS NOT INITIAL.
+      ls_layout = lo_layout->f4_layouts( ).     "Activate F4 Help for Layouts
+      IF ls_layout IS NOT INITIAL.
+        p_layout = ls_layout-layout.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
